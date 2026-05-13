@@ -1,20 +1,23 @@
 import asyncio
 import aiohttp
+from datetime import datetime
 from config.settings import TELEGRAM_BOT_TOKEN, TELEGRAM_TRADER_ID, TELEGRAM_OWNER_ID
 
 class TelegramListener:
     """
-    Фоновый процесс, который опрашивает Telegram API (getUpdates)
-    в поиске нажатий на инлайн-кнопки (callback_query).
+    Фоновый процесс, который опрашивает Telegram API (getUpdates).
+    Слушает команды (например, /start) и нажатия на инлайн-кнопки (callback_query).
     """
     def __init__(self):
         self.token = TELEGRAM_BOT_TOKEN
         self.trader_id = str(TELEGRAM_TRADER_ID)
+        self.owner_id = str(TELEGRAM_OWNER_ID)
         self.base_url = f"https://api.telegram.org/bot{self.token}"
-        self.offset = 0 # Для отслеживания прочитанных сообщений
+        self.offset = 0
 
-    async def _send_to_owner(self, text: str):
-        payload = {"chat_id": TELEGRAM_OWNER_ID, "text": text, "parse_mode": "HTML"}
+    async def _send_text(self, chat_id: str, text: str):
+        """Универсальный метод отправки сообщений по Chat ID"""
+        payload = {"chat_id": chat_id, "text": text, "parse_mode": "HTML"}
         async with aiohttp.ClientSession() as session:
             await session.post(f"{self.base_url}/sendMessage", json=payload)
 
@@ -30,12 +33,11 @@ class TelegramListener:
             print("[Listener] Токен не настроен. Слушатель отключен.")
             return
 
-        print("[Listener] Запущен слушатель кнопок Telegram...")
+        print("[Listener] Запущен слушатель команд и кнопок Telegram...")
         
         async with aiohttp.ClientSession() as session:
             while True:
                 try:
-                    # long polling (ждем ответа до 10 секунд)
                     url = f"{self.base_url}/getUpdates?offset={self.offset}&timeout=10"
                     async with session.get(url) as response:
                         if response.status == 200:
@@ -44,27 +46,41 @@ class TelegramListener:
                             for update in data.get("result", []):
                                 self.offset = update["update_id"] + 1
                                 
-                                # Ищем нажатия на кнопки
-                                if "callback_query" in update:
+                                # 1. Обработка обычных текстовых сообщений
+                                if "message" in update:
+                                    msg = update["message"]
+                                    text = msg.get("text", "")
+                                    chat_id = str(msg["chat"]["id"])
+                                    
+                                    # Проверяем команду /start
+                                    if text == "/start":
+                                        current_time = datetime.now().strftime("%H:%M:%S")
+                                        reply = (
+                                            "🤖 <b>Да, Никитос, я живой!</b>\n\n"
+                                            "Прямо сейчас я нахожусь в поиске торговых ситуаций.\n"
+                                            "<b>Доказательство:</b>\n"
+                                            f"⏳ <i>Последний пинг биржи: {current_time}</i>\n"
+                                            "📊 <i>Анализирую пару: BTC/USDT</i>\n"
+                                            "📈 <i>Таймфрейм: 15m</i>\n\n"
+                                            "Я ищу VSA кульминации (TrueVolume) на уровнях ликвидности (PROfile) с подтверждением по краям (Kraya). Жди сигнала!"
+                                        )
+                                        await self._send_text(chat_id, reply)
+                                        print(f"[Listener] Ответил на команду /start пользователю {chat_id}")
+
+                                # 2. Обработка нажатий на инлайн-кнопки
+                                elif "callback_query" in update:
                                     cb = update["callback_query"]
                                     user_id = str(cb["from"]["id"])
                                     data_text = cb.get("data", "")
                                     cb_id = cb["id"]
                                     
-                                    # Проверяем, что нажал именно Трейдер
                                     if user_id == self.trader_id:
                                         if data_text.startswith("approve_"):
                                             signal_id = data_text.split("_")[1]
-                                            
-                                            # 1. Отвечаем трейдеру, что приняли
                                             await self._answer_callback(cb_id, "✅ Сигнал подтвержден!")
-                                            
-                                            # 2. Отправляем уведомление Тебе (Архитектору)
-                                            await self._send_to_owner(f"👤 <b>Трейдер подтвердил сигнал!</b>\nID: {signal_id}")
-                                            
+                                            await self._send_text(self.owner_id, f"👤 <b>Трейдер подтвердил сигнал!</b>\nID: {signal_id}")
                                             print(f"[Listener] Трейдер подтвердил сигнал {signal_id}!")
                                     else:
-                                        # Нажал кто-то чужой
                                         await self._answer_callback(cb_id, "🚫 У вас нет прав.")
                                         
                 except asyncio.TimeoutError:
@@ -73,4 +89,4 @@ class TelegramListener:
                     print(f"[Listener] Ошибка: {e}")
                     await asyncio.sleep(5)
                 
-                await asyncio.sleep(1) # Небольшая пауза между запросами
+                await asyncio.sleep(1)
