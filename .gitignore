@@ -1,0 +1,20 @@
+# Базовый файл .gitignore для Python проекта
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Виртуальные окружения
+venv/
+env/
+.env
+
+# Логи и базы данных
+*.log
+*.sqlite3
+
+# Конфигурации IDE
+.idea/
+.vscode/
+
+# Jupyter (если вдруг понадобится для тестов)
+.ipynb_checkpoints
