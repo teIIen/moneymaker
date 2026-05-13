@@ -1,5 +1,5 @@
-from dataclasses import dataclass
-from typing import Optional
+from dataclasses import dataclass, field
+from typing import Optional, Dict
 from datetime import datetime
 
 @dataclass
@@ -15,3 +15,6 @@ class TradeSignal:
     stop_loss: Optional[float] = None
     take_profit: Optional[float] = None
     reason: str = ""
+    
+    # Метрики индикаторов на момент сигнала (для статистики и анализа)
+    metrics: Dict[str, any] = field(default_factory=dict)

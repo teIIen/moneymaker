@@ -1,6 +1,7 @@
 import ccxt.async_support as ccxt
 import pandas as pd
 from typing import Optional
+from core_lib.logger import setup_logger
 
 class MarketDataProvider:
     """
@@ -8,39 +9,31 @@ class MarketDataProvider:
     Отвечает за получение OHLCV свечей и преобразование их в pandas.DataFrame.
     """
     def __init__(self, exchange_id: str = 'binance'):
-        # Инициализируем биржу по ее ID (binance, bybit, etc.)
+        self.log = setup_logger("DataProvider")
+        self.log.info(f"Инициализация провайдера данных: {exchange_id}")
+        
         exchange_class = getattr(ccxt, exchange_id)
         self.exchange = exchange_class({
             'enableRateLimit': True,
         })
     
     async def fetch_ohlcv(self, symbol: str, timeframe: str = '1h', limit: int = 100) -> pd.DataFrame:
-        """
-        Скачивает исторические данные (свечи) и возвращает DataFrame.
-        """
         try:
-            # Получаем сырые данные
+            self.log.debug(f"Запрос {limit} свечей для {symbol} ({timeframe})...")
             ohlcv = await self.exchange.fetch_ohlcv(symbol, timeframe, limit=limit)
             
-            # Конвертируем в DataFrame
             df = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
-            
-            # Преобразуем timestamp в читаемый datetime
             df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
             df.set_index('timestamp', inplace=True)
             
-            # Приводим типы к float
             for col in ['open', 'high', 'low', 'close', 'volume']:
                 df[col] = df[col].astype(float)
                 
             return df
         except Exception as e:
-            # В будущем здесь будет использоваться логгер проекта
-            print(f"[Error] Не удалось получить данные для {symbol}: {e}")
+            self.log.error(f"Не удалось получить данные для {symbol}: {e}", exc_info=True)
             raise
     
     async def close(self):
-        """
-        Закрывает соединение с биржей. Обязательно вызывать при завершении работы.
-        """
+        self.log.info("Закрытие соединения с биржей.")
         await self.exchange.close()

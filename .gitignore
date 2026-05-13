@@ -10,7 +10,11 @@ env/
 
 # Логи и базы данных
 *.log
+logs/
 *.sqlite3
+
+# Секреты и конфигурации
+config/settings.py
 
 # Конфигурации IDE
 .idea/
