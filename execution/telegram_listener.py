@@ -1,7 +1,8 @@
 import asyncio
 import aiohttp
 from datetime import datetime
-from config.settings import TELEGRAM_BOT_TOKEN, TELEGRAM_TRADER_ID, TELEGRAM_OWNER_ID
+from config.secrets import TELEGRAM_BOT_TOKEN, TELEGRAM_TRADER_ID, TELEGRAM_OWNER_ID
+from config.settings import TRADING_SYMBOL, TIMEFRAME
 
 class TelegramListener:
     """
@@ -60,8 +61,8 @@ class TelegramListener:
                                             "Прямо сейчас я нахожусь в поиске торговых ситуаций.\n"
                                             "<b>Доказательство:</b>\n"
                                             f"⏳ <i>Последний пинг биржи: {current_time}</i>\n"
-                                            "📊 <i>Анализирую пару: BTC/USDT</i>\n"
-                                            "📈 <i>Таймфрейм: 15m</i>\n\n"
+                                            f"📊 <i>Анализирую пару: {TRADING_SYMBOL}</i>\n"
+                                            f"📈 <i>Таймфрейм: {TIMEFRAME}</i>\n\n"
                                             "Я ищу VSA кульминации (TrueVolume) на уровнях ликвидности (PROfile) с подтверждением по краям (Kraya). Жди сигнала!"
                                         )
                                         await self._send_text(chat_id, reply)

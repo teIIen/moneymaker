@@ -13,8 +13,8 @@ env/
 logs/
 *.sqlite3
 
-# Секреты и конфигурации
-config/settings.py
+# Секреты
+config/secrets.py
 
 # Конфигурации IDE
 .idea/

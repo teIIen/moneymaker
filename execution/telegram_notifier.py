@@ -1,5 +1,5 @@
 import aiohttp
-from config.settings import TELEGRAM_BOT_TOKEN, TELEGRAM_OWNER_ID, TELEGRAM_TRADER_ID
+from config.secrets import TELEGRAM_BOT_TOKEN, TELEGRAM_OWNER_ID, TELEGRAM_TRADER_ID
 
 class TelegramNotifier:
     """

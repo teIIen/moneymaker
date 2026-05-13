@@ -1,5 +1,6 @@
 import asyncio
 from datetime import datetime
+from config.settings import TRADING_SYMBOL, TIMEFRAME, POLL_INTERVAL_SECONDS, START_BALANCE_USD, RISK_PER_TRADE_PERCENT
 from core_lib.data_provider import MarketDataProvider
 from strategy_engine.vsa_strategy import VSAStrategyEngine
 from risk_management.manager import RiskManager
@@ -12,30 +13,25 @@ from core_lib.logger import setup_logger
 log = setup_logger("MainLoop")
 
 async def run_live_bot():
-    symbol = 'BTC/USDT'
-    timeframe = '15m' 
-    poll_interval_seconds = 60 
-    
-    log.info(f"🚀 Запуск Moneymaker2. Пара: {symbol}, ТФ: {timeframe}, Пинг: {poll_interval_seconds}с")
+    log.info(f"🚀 Запуск Moneymaker2. Пара: {TRADING_SYMBOL}, ТФ: {TIMEFRAME}, Пинг: {POLL_INTERVAL_SECONDS}с")
     
     provider = MarketDataProvider(exchange_id='binance')
-    engine = VSAStrategyEngine(symbol)
-    trader = LivePaperTrader(start_balance=1000.0)
-    risk_manager = RiskManager(account_balance_usd=trader.balance, risk_per_trade_percent=1.0)
+    engine = VSAStrategyEngine(TRADING_SYMBOL)
+    trader = LivePaperTrader(start_balance=START_BALANCE_USD)
+    risk_manager = RiskManager(account_balance_usd=trader.balance, risk_per_trade_percent=RISK_PER_TRADE_PERCENT)
     notifier = TelegramNotifier()
     
-    # Теперь отправляем владельцу (тебе)
-    await notifier.send_to_owner(f"🚀 <b>Moneymaker2 запущен!</b>\nПара: {symbol}\nТаймфрейм: {timeframe}")
+    await notifier.send_to_owner(f"🚀 <b>Moneymaker2 запущен!</b>\nПара: {TRADING_SYMBOL}\nТаймфрейм: {TIMEFRAME}")
     
     try:
         while True:
             log.debug("Получение свежих данных с биржи...")
             
-            df = await provider.fetch_ohlcv(symbol, timeframe=timeframe, limit=100)
+            df = await provider.fetch_ohlcv(TRADING_SYMBOL, timeframe=TIMEFRAME, limit=100)
             current_candle = df.iloc[-1]
             
             closed_trades = trader.update_prices(
-                symbol=symbol, 
+                symbol=TRADING_SYMBOL, 
                 current_price=current_candle['close'],
                 high=current_candle['high'],
                 low=current_candle['low']
@@ -54,7 +50,6 @@ async def run_live_bot():
                        f"<b>PNL:</b> ${t['pnl_usd']:.2f}\n"
                        f"<b>Новый баланс:</b> ${trader.balance:.2f}")
                 
-                # Отчеты о закрытых сделках отправляем и тебе, и трейдеру
                 await notifier.send_to_owner(tg_msg)
                 await notifier.send_to_trader_with_keyboard(tg_msg, signal_id=f"closed_{int(datetime.now().timestamp())}")
 
@@ -68,12 +63,10 @@ async def run_live_bot():
                     risk_manager.account_balance_usd = trader.balance
                     instruction = risk_manager.validate_and_size(signal)
                     
-                    # Генерируем уникальный ID сигнала на основе времени
                     sig_id = str(int(signal.timestamp.timestamp()))
+                    log.info(f"✅ СИГНАЛ НАЙДЕН: {instruction.action} {TRADING_SYMBOL}. Ожидание валидации трейдером...")
                     
-                    log.info(f"✅ СИГНАЛ НАЙДЕН: {instruction.action} {symbol}. Ожидание валидации трейдером...")
-                    
-                    tg_msg = (f"🔥 <b>СИГНАЛ: {instruction.action} {symbol}</b>\n\n"
+                    tg_msg = (f"🔥 <b>СИГНАЛ: {instruction.action} {TRADING_SYMBOL}</b>\n\n"
                             f"<b>Логика:</b> {signal.reason}\n\n"
                             f"<b>План сделки (Риск ${instruction.risk_usd:.2f}):</b>\n"
                             f"Вход: {instruction.entry_price:.2f}\n"
@@ -81,19 +74,12 @@ async def run_live_bot():
                             f"Take-Profit: {instruction.take_profit:.2f}\n"
                             f"Размер: {instruction.position_size_coins:.5f} монеты")
                     
-                    # Отправляем сообщение Трейдеру С КНОПКОЙ
                     await notifier.send_to_trader_with_keyboard(tg_msg, signal_id=sig_id)
-                    
-                    # Отправляем сообщение Тебе (как инфо)
                     await notifier.send_to_owner(f"ℹ️ Сигнал {instruction.action} отправлен трейдеру на проверку.")
-                    
-                    # ПОКА ЧТО: Мы просто отправляем сигнал, но в сделку не входим. 
-                    # Входим только в ручном/бумажном режиме или после настройки TelegramListener'а (следующий шаг).
-                    
                 else:
                     log.debug("Сигналов нет. Ожидание.")
 
-            await asyncio.sleep(poll_interval_seconds)
+            await asyncio.sleep(POLL_INTERVAL_SECONDS)
 
     except KeyboardInterrupt:
         log.info("🛑 Работа бота остановлена пользователем.")
@@ -102,11 +88,9 @@ async def run_live_bot():
         await provider.close()
 
 async def main():
-    """Точка входа, запускающая бота и слушателя кнопок параллельно."""
     bot_task = asyncio.create_task(run_live_bot())
     listener = TelegramListener()
     listener_task = asyncio.create_task(listener.listen())
-    
     await asyncio.gather(bot_task, listener_task)
 
 if __name__ == "__main__":
