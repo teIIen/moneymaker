@@ -1,14 +1,31 @@
+MT5_SERVER_URL = "http://192.168.1.213:5000"
+MT5_MAX_CONCURRENT_REQUESTS = 4
 
-# --- Торговые настройки ---
-# Торговая пара (например, 'BTC/USDT', 'ETH/USDT', 'SOL/USDT')
-TRADING_SYMBOL = 'BTC/USDT'
+TRADING_PAIRS = [
+    "EUR/USD",
+    "EUR/JPY",
+    "EUR/CAD",
+    "EUR/GBP",
+    "EUR/AUD",
+    "EUR/CHF",
+    "USD/JPY",
+    "USD/CHF",
+    "USD/CAD",
+    "AUD/CAD",
+    "AUD/USD",
+    "AUD/CHF",
+    "AUD/JPY",
+    "GBP/USD",
+    "GBP/CAD",
+    "GBP/JPY",
+    "GBP/AUD",
+    "GBP/CHF",
+    "CAD/JPY",
+    "CAD/CHF",
+    "CHF/JPY",
+]
 
-# Таймфрейм для анализа свечей ('1m', '5m', '15m', '1h', '4h', '1d')
-TIMEFRAME = '15m'
-
-# Интервал опроса биржи в секундах (как часто бот просыпается и проверяет новые данные)
+TIMEFRAME = "30m"
 POLL_INTERVAL_SECONDS = 60
-
-# --- Настройки Риск-Менеджмента ---
-START_BALANCE_USD = 1000.0
 RISK_PER_TRADE_PERCENT = 1.0
+USE_KRAYA_FILTER = False

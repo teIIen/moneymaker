@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from typing import Optional, Dict
+from typing import Optional, Dict, List
 from datetime import datetime
 
 @dataclass
@@ -18,3 +18,18 @@ class TradeSignal:
     
     # Метрики индикаторов на момент сигнала (для статистики и анализа)
     metrics: Dict[str, any] = field(default_factory=dict)
+
+@dataclass
+class MarketAnalysis:
+    """
+    Объект для передачи полного анализа рынка по конкретной паре.
+    """
+    symbol: str
+    timestamp: datetime
+    current_price: float
+    trend: str # 'Bullish', 'Bearish', 'Neutral'
+    support_levels: List[float] = field(default_factory=list)
+    resistance_levels: List[float] = field(default_factory=list)
+    volume_analysis: Dict[str, any] = field(default_factory=dict)
+    signal: Optional[TradeSignal] = None
+    reason: str = ""

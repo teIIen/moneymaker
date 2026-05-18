@@ -1,97 +1,131 @@
 import asyncio
+import time
 from datetime import datetime
-from config.settings import TRADING_SYMBOL, TIMEFRAME, POLL_INTERVAL_SECONDS, START_BALANCE_USD, RISK_PER_TRADE_PERCENT
-from core_lib.data_provider import MarketDataProvider
-from strategy_engine.vsa_strategy import VSAStrategyEngine
-from risk_management.manager import RiskManager
-from execution.live_paper import LivePaperTrader
-from execution.telegram_notifier import TelegramNotifier
-from execution.telegram_listener import TelegramListener
-from core_lib.logger import setup_logger
 
-# Главный логгер для Event Loop
+from config.settings import POLL_INTERVAL_SECONDS, RISK_PER_TRADE_PERCENT, TIMEFRAME, TRADING_PAIRS
+from core_lib.data_provider import MarketDataProvider
+from core_lib.logger import setup_logger
+from execution.telegram_listener import TelegramListener
+from execution.telegram_notifier import TelegramNotifier
+from risk_management.manager import RiskManager
+from strategy_engine.vsa_strategy import VSAStrategyEngine
+
+
 log = setup_logger("MainLoop")
 
-async def run_live_bot():
-    log.info(f"🚀 Запуск Moneymaker2. Пара: {TRADING_SYMBOL}, ТФ: {TIMEFRAME}, Пинг: {POLL_INTERVAL_SECONDS}с")
-    
-    provider = MarketDataProvider(exchange_id='binance')
-    engine = VSAStrategyEngine(TRADING_SYMBOL)
-    trader = LivePaperTrader(start_balance=START_BALANCE_USD)
-    risk_manager = RiskManager(account_balance_usd=trader.balance, risk_per_trade_percent=RISK_PER_TRADE_PERCENT)
+
+async def process_pair(
+    symbol: str,
+    provider: MarketDataProvider,
+    engine: VSAStrategyEngine,
+    risk_manager: RiskManager,
+    notifier: TelegramNotifier,
+):
+    try:
+        df = await provider.fetch_ohlcv(symbol, timeframe=TIMEFRAME, limit=200)
+
+        if df is None or df.empty:
+            log.warning(f"[{symbol}] No market data received.")
+            return
+
+        signal = engine.analyze(df)
+        if signal is None:
+            return
+
+        instruction = risk_manager.validate_and_size(signal)
+        signal_id = f"{symbol.replace('/', '')}_{int(datetime.now().timestamp())}"
+        log.info(f"Signal found: {instruction.action} {symbol}")
+
+        metrics = signal.metrics or {}
+        trend = metrics.get("trend", "unknown")
+        support = metrics.get("recent_support")
+        resistance = metrics.get("recent_resistance")
+        # VSA Metrics
+        vol_ratio = metrics.get("vol_ratio", "N/A")
+        is_climax = metrics.get("is_climax", False)
+        is_overbought = metrics.get("is_overbought", False)
+        is_oversold = metrics.get("is_oversold", False)
+
+
+        telegram_message = (
+            f"<b>SIGNAL: {instruction.action} {symbol}</b>\n\n"
+            f"<b>Reason:</b> {signal.reason}\n"
+            f"<b>Trend:</b> {trend}\n"
+            f"<b>Support:</b> {support}\n"
+            f"<b>Resistance:</b> {resistance}\n"
+            f"<b>VSA:</b> Vol Ratio={vol_ratio}, Climax={is_climax}, Overbought={is_overbought}, Oversold={is_oversold}\n\n" # Add VSA metrics
+            f"<b>Trade plan (risk ${instruction.risk_usd:.2f}):</b>\n"
+            f"Entry: {instruction.entry_price:.2f}\n"
+            f"Stop-Loss: {instruction.stop_loss:.2f}\n"
+            f"Take-Profit: {instruction.take_profit:.2f}\n"
+            f"Size: {instruction.position_size_coins:.5f}"
+        )
+
+        await notifier.send_to_trader_with_keyboard(telegram_message, signal_id=signal_id)
+        owner_message = (
+            f"<b>Copy for owner</b>\n"
+            f"{telegram_message}\n\n"
+            f"<i>Signal ID:</i> {signal_id}"
+        )
+        await notifier.send_to_owner(owner_message)
+
+    except Exception as exc:
+        log.error(f"[{symbol}] Analysis error: {exc}", exc_info=True)
+
+
+async def run_bot():
+    if not TRADING_PAIRS:
+        log.warning("TRADING_PAIRS is empty. Nothing to scan.")
+        return
+
+    log.info(
+        f"Starting Moneymaker2 scanner. Pairs: {len(TRADING_PAIRS)}, "
+        f"timeframe: {TIMEFRAME}, interval: {POLL_INTERVAL_SECONDS}s"
+    )
+
+    provider = MarketDataProvider()
+    engines = {symbol: VSAStrategyEngine(symbol) for symbol in TRADING_PAIRS}
+    risk_manager = RiskManager(account_balance_usd=1000, risk_per_trade_percent=RISK_PER_TRADE_PERCENT)
     notifier = TelegramNotifier()
-    
-    await notifier.send_to_owner(f"🚀 <b>Moneymaker2 запущен!</b>\nПара: {TRADING_SYMBOL}\nТаймфрейм: {TIMEFRAME}")
-    
+
+    await notifier.send_to_owner(
+        "<b>Moneymaker2 scanner started.</b>\n"
+        f"Pairs: {', '.join(TRADING_PAIRS)}\n"
+        f"Timeframe: {TIMEFRAME}\n"
+        f"Interval: {POLL_INTERVAL_SECONDS}s"
+    )
+
     try:
         while True:
-            log.debug("Получение свежих данных с биржи...")
-            
-            df = await provider.fetch_ohlcv(TRADING_SYMBOL, timeframe=TIMEFRAME, limit=100)
-            current_candle = df.iloc[-1]
-            
-            closed_trades = trader.update_prices(
-                symbol=TRADING_SYMBOL, 
-                current_price=current_candle['close'],
-                high=current_candle['high'],
-                low=current_candle['low']
+            cycle_started_at = time.monotonic()
+            log.info(f"Scanning market: {len(TRADING_PAIRS)} pairs.")
+
+            tasks = [
+                process_pair(symbol, provider, engines[symbol], risk_manager, notifier)
+                for symbol in TRADING_PAIRS
+            ]
+            await asyncio.gather(*tasks)
+
+            elapsed_seconds = time.monotonic() - cycle_started_at
+            sleep_seconds = max(0.0, POLL_INTERVAL_SECONDS - elapsed_seconds)
+            log.info(
+                f"Scan completed in {elapsed_seconds:.1f}s. "
+                f"Next scan in {sleep_seconds:.1f}s."
             )
-            
-            for t in closed_trades:
-                emoji = "✅" if t['pnl_usd'] > 0 else "❌"
-                msg_txt = (f"СДЕЛКА ЗАКРЫТА: {t['action']} | Причина: {t['reason']} | "
-                           f"Вход: {t['entry_price']:.2f} -> Выход: {t['exit_price']:.2f} | PNL: ${t['pnl_usd']:.2f}")
-                log.info(f"🔔 {msg_txt}")
-                
-                tg_msg = (f"{emoji} <b>СДЕЛКА ЗАКРЫТА: {t['action']}</b>\n\n"
-                       f"<b>Причина выхода:</b> {t['reason']}\n"
-                       f"<b>Вход:</b> {t['entry_price']:.2f}\n"
-                       f"<b>Выход:</b> {t['exit_price']:.2f}\n"
-                       f"<b>PNL:</b> ${t['pnl_usd']:.2f}\n"
-                       f"<b>Новый баланс:</b> ${trader.balance:.2f}")
-                
-                await notifier.send_to_owner(tg_msg)
-                await notifier.send_to_trader_with_keyboard(tg_msg, signal_id=f"closed_{int(datetime.now().timestamp())}")
-
-            if trader.active_positions:
-                pos = trader.active_positions[0]
-                log.debug(f"В сделке: {pos.action} от {pos.entry_price:.2f}. Текущий PNL: ${pos.current_pnl_usd:.2f}")
-            else:
-                signal = engine.analyze(df)
-                
-                if signal:
-                    risk_manager.account_balance_usd = trader.balance
-                    instruction = risk_manager.validate_and_size(signal)
-                    
-                    sig_id = str(int(signal.timestamp.timestamp()))
-                    log.info(f"✅ СИГНАЛ НАЙДЕН: {instruction.action} {TRADING_SYMBOL}. Ожидание валидации трейдером...")
-                    
-                    tg_msg = (f"🔥 <b>СИГНАЛ: {instruction.action} {TRADING_SYMBOL}</b>\n\n"
-                            f"<b>Логика:</b> {signal.reason}\n\n"
-                            f"<b>План сделки (Риск ${instruction.risk_usd:.2f}):</b>\n"
-                            f"Вход: {instruction.entry_price:.2f}\n"
-                            f"Stop-Loss: {instruction.stop_loss:.2f}\n"
-                            f"Take-Profit: {instruction.take_profit:.2f}\n"
-                            f"Размер: {instruction.position_size_coins:.5f} монеты")
-                    
-                    await notifier.send_to_trader_with_keyboard(tg_msg, signal_id=sig_id)
-                    await notifier.send_to_owner(f"ℹ️ Сигнал {instruction.action} отправлен трейдеру на проверку.")
-                else:
-                    log.debug("Сигналов нет. Ожидание.")
-
-            await asyncio.sleep(POLL_INTERVAL_SECONDS)
+            await asyncio.sleep(sleep_seconds)
 
     except KeyboardInterrupt:
-        log.info("🛑 Работа бота остановлена пользователем.")
-        await notifier.send_to_owner("🛑 Работа бота остановлена.")
+        log.info("Bot stopped by user.")
+        await notifier.send_to_owner("Moneymaker2 scanner stopped.")
     finally:
         await provider.close()
 
+
 async def main():
-    bot_task = asyncio.create_task(run_live_bot())
-    listener = TelegramListener()
-    listener_task = asyncio.create_task(listener.listen())
+    bot_task = asyncio.create_task(run_bot())
+    listener_task = asyncio.create_task(TelegramListener().listen())
     await asyncio.gather(bot_task, listener_task)
+
 
 if __name__ == "__main__":
     asyncio.run(main())
